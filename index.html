@@ -522,6 +522,9 @@ function renderForm(c){
           </select>
         </div>
       </div>
+      <div class="field"><label>Placa do veículo</label>
+        <input type="text" id="placa" placeholder="Ex: ABC1D23" maxlength="8" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()">
+      </div>
       <div class="field"><label>Tipo de ocorrência</label>
         <select id="tipo" onchange="toggleCampos()">
           <option value="">Selecione...</option>
@@ -572,6 +575,7 @@ async function registrar(){
   const fdata=document.getElementById('fdata').value;
   const turno=document.getElementById('turno').value;
   const maquinario=document.getElementById('maquinario').value;
+  const placa=document.getElementById('placa').value.trim();
   const tipo=document.getElementById('tipo').value;
   const sacaria=document.getElementById('sacaria').value;
   const qtd=parseInt(document.getElementById('qtd').value);
@@ -580,7 +584,7 @@ async function registrar(){
   if(!fdata||!turno||!maquinario||!tipo||!sacaria||!qtd||!produto){alert('Preencha todos os campos obrigatórios.');return}
   if(tipo==='outros'){const obsOut=document.getElementById('obs-outros').value.trim();if(!obsOut){alert('Descreva a ocorrência para o tipo "Outros".');return}}
   const obsOutros=tipo==='outros'?(document.getElementById('obs-outros').value.trim()||null):null;
-  const reg={op,data:fdata,turno,maquinario,tipo,sacaria,qtd,produto,obs:obs||null,obs_outros:obsOutros,status:'pending',operador_nome:session.name,unidade_id:session.unidade_id||null};
+  const reg={op,data:fdata,turno,maquinario,placa:placa||null,tipo,sacaria,qtd,produto,obs:obs||null,obs_outros:obsOutros,status:'pending',operador_nome:session.name,unidade_id:session.unidade_id||null};
   if(tipo==='substituicao'){const lt=document.getElementById('sacaria-lt').value;if(!lt){alert('Informe a sacaria da lista técnica.');return}reg.sacaria_lt=lt}
   const btn=document.getElementById('btn-reg');btn.disabled=true;btn.innerHTML=`<span class="spinner"></span>Enviando...`;
   try{
@@ -619,6 +623,7 @@ async function renderRequisicoes(c){
               ${tipoBadge(r.tipo)}
               ${r.turno?turnoBadge(r.turno):''}
               ${r.maquinario?`<span class="badge b-normal">${r.maquinario}</span>`:''}
+              ${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}
               <span class="badge b-pending">Pendente</span>
               <span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span>
             </div>
@@ -642,7 +647,7 @@ async function renderMinhas(c){
       <div class="card" style="padding:4px 22px;">
         ${!mine.length?'<div class="empty">Nenhum registro ainda.</div>':
         mine.map(r=>`<div class="row">
-          <div class="row-head">${r.op&&r.op.startsWith('REQ-')?'<span class="badge" style="background:var(--purple-bg);color:var(--purple-text);">REQ</span>':'<span class="badge b-normal">OP</span>'}<strong style="font-family:${r.op&&r.op.startsWith('REQ-')?'var(--mono)':'inherit'}">${r.op}</strong>${tipoBadge(r.tipo)}${statusBadge(r.status)}${r.turno?turnoBadge(r.turno):''}${r.maquinario?`<span class="badge b-normal">${r.maquinario}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
+          <div class="row-head">${r.op&&r.op.startsWith('REQ-')?'<span class="badge" style="background:var(--purple-bg);color:var(--purple-text);">REQ</span>':'<span class="badge b-normal">OP</span>'}<strong style="font-family:${r.op&&r.op.startsWith('REQ-')?'var(--mono)':'inherit'}">${r.op}</strong>${tipoBadge(r.tipo)}${statusBadge(r.status)}${r.turno?turnoBadge(r.turno):''}${r.maquinario?`<span class="badge b-normal">${r.maquinario}</span>`:''}${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
           <div class="row-sub">${r.sacaria} · ${fmtNum(r.qtd)} un · ${r.produto}</div>
           ${r.sacaria_lt?`<div class="row-sub" style="color:#A32D2D;">Prevista na LT: ${r.sacaria_lt}</div>`:''}
           ${r.aprovador_nome?`<div class="row-sub" style="margin-top:3px;">Por: ${r.aprovador_nome}${r.obs_aprovador?' · '+r.obs_aprovador:''}</div>`:''}
@@ -672,7 +677,7 @@ async function renderAprovacao(c){
         pendentes.map(r=>{
           const un=r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'';
           return`<div class="row">
-            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
+            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
             <div class="row-sub">Operador: ${r.operador_nome} · ${r.sacaria} · ${fmtNum(r.qtd)} un · ${r.produto}</div>
             <div class="row-sub">${r.turno?turnoBadge(r.turno):''}${r.maquinario?` <span class="badge b-normal">${r.maquinario}</span>`:''}</div>
             ${r.sacaria_lt?`<div class="row-sub" style="color:#A32D2D;">Prevista na LT: ${r.sacaria_lt}</div>`:''}
@@ -691,7 +696,7 @@ async function renderAprovacao(c){
         outros.map(r=>{
           const un=r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'';
           return`<div class="row">
-            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${statusBadge(r.status)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
+            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${statusBadge(r.status)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
             <div class="row-sub">${r.operador_nome} · ${r.sacaria} · ${fmtNum(r.qtd)} un</div>
             ${r.aprovador_nome?`<div class="row-sub">Por: ${r.aprovador_nome}${r.obs_aprovador?' · '+r.obs_aprovador:''}</div>`:''}
           </div>`}).join('')}
@@ -851,7 +856,7 @@ async function renderReport(c){
         all.map(r=>{
           const un=r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'';
           return`<div class="row">
-            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
+            <div class="row-head"><strong>${r.op}</strong>${tipoBadge(r.tipo)}${un?`<span class="badge b-pcp" style="font-size:10px;">${un}</span>`:''}${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}<span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span></div>
             <div class="row-sub">${r.operador_nome} · ${r.sacaria} · ${fmtNum(r.qtd)} un · ${r.produto}</div>
             ${r.sacaria_lt?`<div class="row-sub" style="color:#A32D2D;">Prevista na LT: ${r.sacaria_lt}</div>`:''}
             ${r.motivo?`<div class="row-sub">Motivo: ${r.motivo}</div>`:''}
@@ -1025,9 +1030,9 @@ async function exportExcel(){
   if(!regsData){try{regsData=await sbGet('registros','?order=id.desc')}catch(e){alert('Erro: '+e.message);return}}
   const wb=XLSX.utils.book_new();
   const tipoLabel={normal:'Consumo normal',substituicao:'Substituição indevida','rasgo-correia':'Rasgo correia Dalla','defeito-fabrica':'Defeito de fábrica','falta-carregamento':'Falta no carregamento','complemento-peso':'Complemento de peso','amostra-teste':'Amostra p/ testes','rasgo-pressao':'Rasgo na pressão','rasgo-caminhao':'Rasgo no caminhão','produto-contaminado':'Produto contaminado',outros:'Outros'};
-  const allData=regsData.map(r=>({'OP':r.op,'Data':fmtDate(r.data),'Unidade':r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'','Turno':r.turno||'','Maquinário':r.maquinario||'','Operador':r.operador_nome,'Tipo':tipoLabel[r.tipo]||r.tipo,'Sacaria utilizada':r.sacaria,'Sacaria na lista técnica':r.sacaria_lt||'','Quantidade (un)':r.qtd,'Produto':r.produto,'Descrição (Outros)':r.obs_outros||'','Observação':r.obs||'','Status':r.status==='pending'?'Aguardando':r.status==='approved'?'Aprovado':'Rejeitado','Aprovador':r.aprovador_nome||'','Obs. aprovador':r.obs_aprovador||'','Data aprovação':r.aprovado_em?new Date(r.aprovado_em).toLocaleDateString('pt-BR'):''}));
+  const allData=regsData.map(r=>({'OP':r.op,'Data':fmtDate(r.data),'Unidade':r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'','Turno':r.turno||'','Maquinário':r.maquinario||'','Placa':r.placa||'','Operador':r.operador_nome,'Tipo':tipoLabel[r.tipo]||r.tipo,'Sacaria utilizada':r.sacaria,'Sacaria na lista técnica':r.sacaria_lt||'','Quantidade (un)':r.qtd,'Produto':r.produto,'Descrição (Outros)':r.obs_outros||'','Observação':r.obs||'','Status':r.status==='pending'?'Aguardando':r.status==='approved'?'Aprovado':'Rejeitado','Aprovador':r.aprovador_nome||'','Obs. aprovador':r.obs_aprovador||'','Data aprovação':r.aprovado_em?new Date(r.aprovado_em).toLocaleDateString('pt-BR'):''}));
   const ws1=XLSX.utils.json_to_sheet(allData.length?allData:[{'Sem registros':''}]);
-  ws1['!cols']=[{wch:14},{wch:12},{wch:18},{wch:20},{wch:22},{wch:38},{wch:38},{wch:16},{wch:22},{wch:22},{wch:25},{wch:12},{wch:18},{wch:25},{wch:16}];
+  ws1['!cols']=[{wch:14},{wch:12},{wch:18},{wch:20},{wch:22},{wch:14},{wch:38},{wch:38},{wch:16},{wch:22},{wch:22},{wch:25},{wch:12},{wch:18},{wch:25},{wch:16}];
   XLSX.utils.book_append_sheet(wb,ws1,'Registros');
   const sacarias=[...new Set(regsData.map(r=>r.sacaria))];
   const resumo=sacarias.map(s=>{const mine=regsData.filter(r=>r.sacaria===s&&r.status==='approved');return{'Sacaria':s,'Consumo normal (un)':mine.filter(r=>r.tipo==='normal').reduce((a,r)=>a+r.qtd,0),'Perdas (un)':mine.filter(r=>r.tipo==='perda').reduce((a,r)=>a+r.qtd,0),'Substituições':mine.filter(r=>r.tipo==='substituicao').length,'Total aprovado (un)':mine.reduce((a,r)=>a+r.qtd,0)}});
