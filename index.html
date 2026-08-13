@@ -280,7 +280,7 @@ function turnoBadge(t){
   return`<span class="badge" style="background:${cores[t]||'var(--surface2);color:var(--text2)'}">Turno ${t}</span>`;
 }
 function statusBadge(s){
-  return{pending:'<span class="badge b-pending">Aguardando</span>',approved:'<span class="badge b-approved">Aprovado</span>',rejected:'<span class="badge b-rejected">Rejeitado</span>'}[s]||'';
+  return{pending:'<span class="badge b-pending">Aguardando</span>',liberado:'<span class="badge" style="background:var(--teal-bg);color:var(--teal-text);">✅ Liberado</span>',approved:'<span class="badge b-approved">Aprovado</span>',rejected:'<span class="badge b-rejected">Rejeitado</span>'}[s]||'';
 }
 function tipoBadge(t){
   const map={normal:'Consumo normal',perda:'Perda',substituicao:'Substituição','rasgo-correia':'Rasgo correia Dalla','defeito-fabrica':'Defeito de fábrica','falta-carregamento':'Falta no carregamento','complemento-peso':'Complemento de peso','amostra-teste':'Amostra p/ testes','rasgo-pressao':'Rasgo na pressão','rasgo-caminhao':'Rasgo no caminhão','produto-contaminado':'Produto contaminado',outros:'Outros'};
@@ -406,10 +406,10 @@ function renderApp(){
   const tabMap={
     estamparia:[{k:'form',l:'Registrar saída'},{k:'minhas',l:'Minhas saídas'},{k:'requisicoes',l:'📋 Requisições'}],
     'operador-painel':[{k:'form',l:'Registrar saída'},{k:'minhas',l:'Minhas saídas'},{k:'requisicoes',l:'📋 Requisições'}],
-    pcp:[{k:'form',l:'Registrar saída'},{k:'minhas',l:'Minhas saídas'},{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'}],
+    pcp:[{k:'form',l:'Registrar saída'},{k:'minhas',l:'Minhas saídas'},{k:'requisicoes',l:'📋 Requisições'},{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'}],
     supervisor:[{k:'aprovacao',l:'Aprovações'},{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'}],
-    'coordenador-pcp':[{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'}],
-    'pcp-admin':[{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'},{k:'usuarios',l:'Usuários'}]
+    'coordenador-pcp':[{k:'requisicoes',l:'📋 Requisições'},{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'}],
+    'pcp-admin':[{k:'requisicoes',l:'📋 Requisições'},{k:'dashboard',l:'Dashboard'},{k:'report',l:'Relatório'},{k:'usuarios',l:'Usuários'}]
   };
   const tabs=tabMap[session.role]||[];
   const unidadeNome=session.unidade_id?UNIDADES.find(u=>u.id===session.unidade_id)?.nome||session.unidade_id:'';
@@ -599,41 +599,82 @@ async function registrar(){
   }
 }
 
-// ---- REQUISIÇÕES (painel operador) ----
+// ---- REQUISIÇÕES ----
+const PODE_LIBERAR=['estamparia','operador-painel','pcp','coordenador-pcp','pcp-admin'];
 async function renderRequisicoes(c){
   setLoading(c);
   try{
     const uid=session.unidade_id||'';
-    let params=uid?`?status=eq.pending&unidade_id=eq.${uid}&order=id.desc`:'?status=eq.pending&order=id.desc';
-    const all=await sbGet('registros',params);
-    const reqs=all;
-    const tipoLabel={normal:'Consumo normal',substituicao:'Substituição indevida','rasgo-correia':'Rasgo correia Dalla','defeito-fabrica':'Defeito de fábrica','falta-carregamento':'Falta no carregamento','complemento-peso':'Complemento de peso','amostra-teste':'Amostra p/ testes','rasgo-pressao':'Rasgo na pressão','rasgo-caminhao':'Rasgo no caminhão','produto-contaminado':'Produto contaminado',outros:'Outros'};
+    // pcp-admin e coordenador-pcp sem unidade veem tudo; demais filtram pela unidade
+    let params=uid
+      ?`?or=(status.eq.pending,status.eq.liberado)&unidade_id=eq.${uid}&order=id.desc`
+      :`?or=(status.eq.pending,status.eq.liberado)&order=id.desc`;
+    const reqs=await sbGet('registros',params);
+    const pendentes=reqs.filter(r=>r.status==='pending');
+    const liberados=reqs.filter(r=>r.status==='liberado');
+    const podeLiberar=PODE_LIBERAR.includes(session.role);
     c.innerHTML=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <p class="section-title" style="margin:0;">Movimentações em aberto — sua unidade (${reqs.length})</p>
-        <button class="btn-primary" style="padding:6px 14px;font-size:13px;" onclick="renderRequisicoes(document.getElementById('tab-content'))">🔄 Atualizar</button>
+        <p class="section-title" style="margin:0;">Requisições em aberto (${reqs.length})</p>
+        <button class="btn-primary" style="padding:6px 14px;font-size:13px;width:auto;" onclick="renderRequisicoes(document.getElementById('tab-content'))">🔄 Atualizar</button>
       </div>
-      <div class="card" style="padding:4px 22px;">
-        ${!reqs.length?'<div class="empty">Nenhuma movimentação em aberto.</div>':
-        reqs.map(r=>`
-          <div class="row">
+      ${pendentes.length?`
+      <p class="section-title">Aguardando liberação (${pendentes.length})</p>
+      <div class="card" style="padding:4px 22px;margin-bottom:16px;">
+        ${pendentes.map(r=>`
+          <div class="row" id="req-row-${r.id}">
             <div class="row-head">
               ${r.op&&r.op.startsWith('REQ-')?'<span class="badge" style="background:var(--purple-bg);color:var(--purple-text);">REQ</span>':'<span class="badge b-normal">OP</span>'}
-              <strong style="font-family:${r.op&&r.op.startsWith('REQ-')?'var(--mono)':'inherit'};color:var(--brand);">${r.op}</strong>
-              ${tipoBadge(r.tipo)}
-              ${r.turno?turnoBadge(r.turno):''}
+              <strong style="font-family:${r.op&&r.op.startsWith('REQ-')?'DM Mono,monospace':'inherit'};color:var(--brand);">${r.op}</strong>
+              ${tipoBadge(r.tipo)}${r.turno?turnoBadge(r.turno):''}
               ${r.maquinario?`<span class="badge b-normal">${r.maquinario}</span>`:''}
               ${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}
-              <span class="badge b-pending">Pendente</span>
+              <span class="badge b-pending">Aguardando</span>
               <span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span>
             </div>
             <div class="row-sub"><strong>${r.sacaria}</strong> · ${fmtNum(r.qtd)} un · ${r.produto}</div>
             <div class="row-sub">Solicitante: ${r.operador_nome}</div>
             ${r.obs_outros?`<div class="row-sub">Descrição: ${r.obs_outros}</div>`:''}
             ${r.obs?`<div class="row-sub">Obs: ${r.obs}</div>`:''}
+            ${podeLiberar?`<div class="row-actions">
+              <button class="btn-approve" style="gap:5px;" onclick="liberar('${r.id}')">${icons.check} Liberar sacaria</button>
+            </div>`:''}
           </div>`).join('')}
-      </div>`;
+      </div>`:''}
+      ${liberados.length?`
+      <p class="section-title">Liberados — aguardando aprovação do supervisor (${liberados.length})</p>
+      <div class="card" style="padding:4px 22px;">
+        ${liberados.map(r=>`
+          <div class="row">
+            <div class="row-head">
+              ${r.op&&r.op.startsWith('REQ-')?'<span class="badge" style="background:var(--purple-bg);color:var(--purple-text);">REQ</span>':'<span class="badge b-normal">OP</span>'}
+              <strong style="font-family:${r.op&&r.op.startsWith('REQ-')?'DM Mono,monospace':'inherit'};color:var(--brand);">${r.op}</strong>
+              ${tipoBadge(r.tipo)}${r.turno?turnoBadge(r.turno):''}
+              ${r.maquinario?`<span class="badge b-normal">${r.maquinario}</span>`:''}
+              ${r.placa?`<span class="badge b-normal">🚚 ${r.placa}</span>`:''}
+              <span class="badge" style="background:var(--teal-bg);color:var(--teal-text);">✅ Liberado</span>
+              <span style="font-size:11px;color:var(--text3);">${fmtDate(r.data)}</span>
+            </div>
+            <div class="row-sub"><strong>${r.sacaria}</strong> · ${fmtNum(r.qtd)} un · ${r.produto}</div>
+            <div class="row-sub">Solicitante: ${r.operador_nome}</div>
+            ${r.liberador_nome?`<div class="row-sub" style="color:var(--teal-text);">Liberado por: <strong>${r.liberador_nome}</strong>${r.liberado_em?' em '+new Date(r.liberado_em).toLocaleString('pt-BR'):''}</div>`:''}
+            ${r.obs?`<div class="row-sub">Obs: ${r.obs}</div>`:''}
+          </div>`).join('')}
+      </div>`:''}
+      ${!reqs.length?'<div class="card"><div class="empty">Nenhuma requisição em aberto.</div></div>':''}`;
   }catch(e){c.innerHTML=`<div class="alert alert-err">${icons.err}<span>Erro: ${e.message}</span></div>`}
+}
+
+async function liberar(id){
+  if(!confirm('Confirmar liberação da sacaria?'))return;
+  try{
+    await sbPatch('registros',id,{
+      status:'liberado',
+      liberador_nome:session.name,
+      liberado_em:new Date().toISOString()
+    });
+    renderRequisicoes(document.getElementById('tab-content'));
+  }catch(e){alert('Erro ao liberar: '+e.message)}
 }
 
 // ---- MINHAS SAÍDAS ----
@@ -666,8 +707,8 @@ async function renderAprovacao(c){
       params=`?unidade_id=eq.${session.unidade_id}&order=id.desc`;
     }
     const all=await sbGet('registros',params);
-    const pendentes=all.filter(r=>r.status==='pending');
-    const outros=all.filter(r=>r.status!=='pending');
+    const pendentes=all.filter(r=>r.status==='pending'||r.status==='liberado');
+    const outros=all.filter(r=>r.status!=='pending'&&r.status!=='liberado');
     const uNome=session.unidade_id?UNIDADES.find(u=>u.id===session.unidade_id)?.nome||session.unidade_id:'';
     c.innerHTML=`
       ${uNome&&session.role!=='pcp-admin'?`<div class="alert alert-info">${icons.info}<span>Exibindo registros da unidade: <strong>${uNome}</strong></span></div>`:''}
@@ -683,6 +724,7 @@ async function renderAprovacao(c){
             ${r.sacaria_lt?`<div class="row-sub" style="color:#A32D2D;">Prevista na LT: ${r.sacaria_lt}</div>`:''}
             ${r.obs_outros?`<div class="row-sub">Descrição: ${r.obs_outros}</div>`:''}
             ${r.obs?`<div class="row-sub">Obs: ${r.obs}</div>`:''}
+            ${r.liberador_nome?`<div class="row-sub" style="color:var(--teal-text);">✅ Liberado por: <strong>${r.liberador_nome}</strong>${r.liberado_em?' em '+new Date(r.liberado_em).toLocaleString('pt-BR'):''}</div>`:''}
             <div class="row-actions">
               <input type="text" placeholder="Observação (opcional)" id="obs-${r.id}" style="height:30px;font-size:12px;">
               <button class="btn-approve" onclick="aprovar('${r.id}')">${icons.check} Aprovar</button>
@@ -1030,9 +1072,10 @@ async function exportExcel(){
   if(!regsData){try{regsData=await sbGet('registros','?order=id.desc')}catch(e){alert('Erro: '+e.message);return}}
   const wb=XLSX.utils.book_new();
   const tipoLabel={normal:'Consumo normal',substituicao:'Substituição indevida','rasgo-correia':'Rasgo correia Dalla','defeito-fabrica':'Defeito de fábrica','falta-carregamento':'Falta no carregamento','complemento-peso':'Complemento de peso','amostra-teste':'Amostra p/ testes','rasgo-pressao':'Rasgo na pressão','rasgo-caminhao':'Rasgo no caminhão','produto-contaminado':'Produto contaminado',outros:'Outros'};
-  const allData=regsData.map(r=>({'OP':r.op,'Data':fmtDate(r.data),'Unidade':r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'','Turno':r.turno||'','Maquinário':r.maquinario||'','Placa':r.placa||'','Operador':r.operador_nome,'Tipo':tipoLabel[r.tipo]||r.tipo,'Sacaria utilizada':r.sacaria,'Sacaria na lista técnica':r.sacaria_lt||'','Quantidade (un)':r.qtd,'Produto':r.produto,'Descrição (Outros)':r.obs_outros||'','Observação':r.obs||'','Status':r.status==='pending'?'Aguardando':r.status==='approved'?'Aprovado':'Rejeitado','Aprovador':r.aprovador_nome||'','Obs. aprovador':r.obs_aprovador||'','Data aprovação':r.aprovado_em?new Date(r.aprovado_em).toLocaleDateString('pt-BR'):''}));
+  const statusLabel={pending:'Aguardando',liberado:'Liberado',approved:'Aprovado',rejected:'Rejeitado'};
+  const allData=regsData.map(r=>({'OP':r.op,'Data':fmtDate(r.data),'Unidade':r.unidade_id?UNIDADES.find(u=>u.id===r.unidade_id)?.nome||r.unidade_id:'','Turno':r.turno||'','Maquinário':r.maquinario||'','Placa':r.placa||'','Operador':r.operador_nome,'Tipo':tipoLabel[r.tipo]||r.tipo,'Sacaria utilizada':r.sacaria,'Sacaria na lista técnica':r.sacaria_lt||'','Quantidade (un)':r.qtd,'Produto':r.produto,'Descrição (Outros)':r.obs_outros||'','Observação':r.obs||'','Status':statusLabel[r.status]||r.status,'Liberador':r.liberador_nome||'','Data liberação':r.liberado_em?new Date(r.liberado_em).toLocaleString('pt-BR'):'','Aprovador':r.aprovador_nome||'','Obs. aprovador':r.obs_aprovador||'','Data aprovação':r.aprovado_em?new Date(r.aprovado_em).toLocaleDateString('pt-BR'):''}));
   const ws1=XLSX.utils.json_to_sheet(allData.length?allData:[{'Sem registros':''}]);
-  ws1['!cols']=[{wch:14},{wch:12},{wch:18},{wch:20},{wch:22},{wch:14},{wch:38},{wch:38},{wch:16},{wch:22},{wch:22},{wch:25},{wch:12},{wch:18},{wch:25},{wch:16}];
+  ws1['!cols']=[{wch:14},{wch:12},{wch:18},{wch:10},{wch:12},{wch:12},{wch:26},{wch:24},{wch:36},{wch:36},{wch:14},{wch:22},{wch:18},{wch:20},{wch:12},{wch:24},{wch:20},{wch:24},{wch:20},{wch:18}];
   XLSX.utils.book_append_sheet(wb,ws1,'Registros');
   const sacarias=[...new Set(regsData.map(r=>r.sacaria))];
   const resumo=sacarias.map(s=>{const mine=regsData.filter(r=>r.sacaria===s&&r.status==='approved');return{'Sacaria':s,'Consumo normal (un)':mine.filter(r=>r.tipo==='normal').reduce((a,r)=>a+r.qtd,0),'Perdas (un)':mine.filter(r=>r.tipo==='perda').reduce((a,r)=>a+r.qtd,0),'Substituições':mine.filter(r=>r.tipo==='substituicao').length,'Total aprovado (un)':mine.reduce((a,r)=>a+r.qtd,0)}});
