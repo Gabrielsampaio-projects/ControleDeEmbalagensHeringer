@@ -195,6 +195,15 @@ textarea{height:64px;resize:vertical}
 .spinner-dark{border-color:rgba(0,0,0,0.15);border-top-color:var(--brand)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* Notificações */
+.btn-notif{position:relative}
+.notif-badge{position:absolute;top:-5px;right:-5px;background:#fff;color:var(--brand2);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 1px 4px rgba(0,0,0,0.3);line-height:1;}
+#toast-wrap{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:340px}
+@media(max-width:480px){#toast-wrap{left:16px;right:16px;max-width:none}}
+.toast-item{background:var(--surface);color:var(--text);border:1px solid var(--border2);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,0.20);animation:toastIn .25s ease;cursor:pointer;display:flex;align-items:flex-start;gap:8px}
+.toast-item:hover{background:var(--surface3)}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
 /* Responsive */
 @media(max-width:768px){
   .grid2,.grid3,.grid4,.dash-grid,.dash-grid-3{grid-template-columns:1fr 1fr}
@@ -353,7 +362,7 @@ async function doLogin(){
     if(session.must_change_password){renderForcePassword()}else{renderApp()}
   }catch(e){renderLogin('Erro ao conectar: '+e.message)}
 }
-function doLogout(){session=null;saveSession(null);renderLogin()}
+function doLogout(){stopNotifPolling();session=null;saveSession(null);renderLogin()}
 
 // ---- TROCA DE SENHA OBRIGATÓRIA (1º LOGIN) ----
 function renderForcePassword(){
@@ -399,6 +408,90 @@ function toggleTheme(){
   if(btn)btn.textContent=isDark?'☀️':'🌙';
 }
 
+// ---- NOTIFICAÇÕES ----
+// Aviso: como este app não tem servidor/push próprio, as notificações funcionam
+// por consulta periódica (polling) enquanto o app estiver aberto no navegador,
+// mais um toast interno e (se autorizado) uma notificação do sistema operacional.
+let notifTimer=null, notifLastMaxId=null, notifCount=0;
+function notifStorageKey(){return `notif_lastid_${session.user}`}
+function notifScope(){
+  const uid=session.unidade_id||'';
+  if(session.role==='supervisor'){
+    const params=uid?`?or=(status.eq.pending,status.eq.liberado)&unidade_id=eq.${uid}&order=id.desc&limit=30`
+                    :`?or=(status.eq.pending,status.eq.liberado)&order=id.desc&limit=30`;
+    return{params,tabKey:'aprovacao'};
+  }
+  if(typeof PODE_LIBERAR!=='undefined'&&PODE_LIBERAR.includes(session.role)){
+    const params=uid?`?status=eq.pending&unidade_id=eq.${uid}&order=id.desc&limit=30`
+                    :`?status=eq.pending&order=id.desc&limit=30`;
+    return{params,tabKey:'requisicoes'};
+  }
+  return null;
+}
+function startNotifPolling(){
+  stopNotifPolling();
+  if(!notifScope())return;
+  const stored=localStorage.getItem(notifStorageKey());
+  notifLastMaxId=stored?parseInt(stored):null;
+  checkNotifications();
+  notifTimer=setInterval(checkNotifications,25000);
+}
+function stopNotifPolling(){if(notifTimer){clearInterval(notifTimer);notifTimer=null}}
+async function checkNotifications(){
+  const scope=notifScope();
+  if(!scope)return;
+  try{
+    const items=await sbGet('registros',scope.params);
+    const maxId=items.length?Math.max(...items.map(r=>r.id)):0;
+    if(notifLastMaxId===null){
+      // primeira vez neste dispositivo/usuário: define o ponto de partida sem notificar retroativo
+      notifLastMaxId=maxId;
+      localStorage.setItem(notifStorageKey(),String(maxId));
+    }else{
+      const novos=items.filter(r=>r.id>notifLastMaxId).sort((a,b)=>a.id-b.id);
+      if(novos.length){
+        novos.forEach(r=>{
+          const uNome=r.unidade_id?(UNIDADES.find(u=>u.id===r.unidade_id)?.nome||''):'';
+          const msg=`📋 Nova requisição aberta — ${r.op} · ${r.operador_nome}${uNome?' · '+uNome:''}`;
+          showToast(msg);
+          if(window.Notification&&Notification.permission==='granted'){
+            try{new Notification('Nova requisição — Controle de Embalagens',{body:`${r.op} · ${r.operador_nome}${uNome?' · '+uNome:''}`,tag:'req-'+r.id});}catch(e){}
+          }
+        });
+      }
+      if(maxId>notifLastMaxId){notifLastMaxId=maxId;localStorage.setItem(notifStorageKey(),String(maxId))}
+    }
+    notifCount=items.length;
+    renderNotifBadge();
+  }catch(e){/* falha silenciosa — não interrompe o uso do app */}
+}
+function renderNotifBadge(){
+  const b=document.getElementById('notif-badge');
+  if(!b)return;
+  if(notifCount>0){b.textContent=notifCount>9?'9+':notifCount;b.style.display='flex'}
+  else{b.style.display='none'}
+}
+function goToNotifTab(){
+  const scope=notifScope();
+  if(!scope)return;
+  const tabBtn=[...document.querySelectorAll('.tab')].find(t=>t.getAttribute('onclick')===`switchTab('${scope.tabKey}',this)`);
+  if(tabBtn)tabBtn.click();
+}
+function showToast(msg){
+  let wrap=document.getElementById('toast-wrap');
+  if(!wrap){
+    wrap=document.createElement('div');
+    wrap.id='toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  const el=document.createElement('div');
+  el.className='toast-item';
+  el.innerHTML=`<span>🔔</span><span>${msg}</span>`;
+  el.onclick=()=>{el.remove();goToNotifTab()};
+  wrap.appendChild(el);
+  setTimeout(()=>{el.style.transition='opacity .4s';el.style.opacity='0';setTimeout(()=>el.remove(),400)},8000);
+}
+
 // ---- APP ----
 function renderApp(){
   const [abg,acol]=avatarColors(session.role);
@@ -431,6 +524,7 @@ function renderApp(){
             <div class="uname">${session.name}</div>
             <div class="urole">${roleBadge(session.role)}</div>
           </div>
+          <button id="btn-notif" class="btn-theme btn-notif" onclick="goToNotifTab()" title="Notificações">🔔<span class="notif-badge" id="notif-badge">0</span></button>
           <button id="btn-theme" class="btn-theme" onclick="toggleTheme()" title="Alternar modo claro/escuro">${document.body.classList.contains('dark')?'☀️':'🌙'}</button>
           <button class="btn-logout" onclick="doLogout()">${icons.logout} Sair</button>
         </div>
@@ -443,6 +537,10 @@ function renderApp(){
       </div>
     </div>`;
   renderTab(tabs[0].k);
+  startNotifPolling();
+  if(window.Notification&&Notification.permission==='default'){
+    Notification.requestPermission();
+  }
 }
 
 let currentTab='';
@@ -465,6 +563,15 @@ function renderTab(k){
 }
 
 // ---- FORM ----
+// Retorna a data de HOJE no fuso horário local (evita bug do toISOString(), que usa UTC
+// e "pula" pro dia seguinte à noite em fusos negativos como o do Brasil)
+function todayLocalISO(){
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const dia=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dia}`;
+}
 function gerarNumReq(){
   // REQ-YYYYMMDD-XXXXX
   const d=new Date();
@@ -473,7 +580,7 @@ function gerarNumReq(){
   return`REQ-${ds}-${seq}`;
 }
 function renderForm(c){
-  const today=new Date().toISOString().split('T')[0];
+  const today=todayLocalISO();
   const uid=session.unidade_id||'';
   const sacariasList=uid&&SACARIAS_MAP[uid]?SACARIAS_MAP[uid]:[...new Set(Object.values(SACARIAS_MAP).flat())];
   const opts=sacariasList.map(s=>`<option>${s}</option>`).join('');
@@ -606,9 +713,10 @@ async function renderRequisicoes(c){
   try{
     const uid=session.unidade_id||'';
     // pcp-admin e coordenador-pcp sem unidade veem tudo; demais filtram pela unidade
+    // ordenado por Data (mais novas primeiro) e, para mesma data, pelo id (ordem de abertura) decrescente
     let params=uid
-      ?`?or=(status.eq.pending,status.eq.liberado)&unidade_id=eq.${uid}&order=id.desc`
-      :`?or=(status.eq.pending,status.eq.liberado)&order=id.desc`;
+      ?`?or=(status.eq.pending,status.eq.liberado)&unidade_id=eq.${uid}&order=data.desc,id.desc`
+      :`?or=(status.eq.pending,status.eq.liberado)&order=data.desc,id.desc`;
     const reqs=await sbGet('registros',params);
     const pendentes=reqs.filter(r=>r.status==='pending');
     const liberados=reqs.filter(r=>r.status==='liberado');
@@ -1086,7 +1194,7 @@ async function exportExcel(){
   const ws3=XLSX.utils.json_to_sheet(subst.length?subst:[{'Sem substituições':''}]);
   ws3['!cols']=[{wch:14},{wch:12},{wch:18},{wch:20},{wch:38},{wch:38},{wch:12},{wch:22},{wch:12},{wch:25}];
   XLSX.utils.book_append_sheet(wb,ws3,'Substituições indevidas');
-  XLSX.writeFile(wb,`controle_embalagens_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb,`controle_embalagens_${todayLocalISO()}.xlsx`);
 }
 
 init();
